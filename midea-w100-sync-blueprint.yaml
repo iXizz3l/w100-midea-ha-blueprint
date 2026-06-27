@@ -140,6 +140,7 @@ variables:
   w100_ext_hum_entity: "{{ 'number.' ~ aqara_w100.split('.')[1] ~ '_external_humidity' }}"
 
 triggers:
+  # W100 — separate triggers per meaningful attribute to avoid firing on sensor updates
   - trigger: state
     entity_id: !input aqara_w100
     for:
@@ -147,7 +148,36 @@ triggers:
     id: w100_state
 
   - trigger: state
+    entity_id: !input aqara_w100
+    attribute: temperature
+    for:
+      seconds: !input debounce_delay
+    id: w100_state
+
+  - trigger: state
+    entity_id: !input aqara_w100
+    attribute: fan_mode
+    for:
+      seconds: !input debounce_delay
+    id: w100_state
+
+  # Midea — separate triggers per meaningful attribute to avoid firing on sensor updates
+  - trigger: state
     entity_id: !input midea_ac
+    for:
+      seconds: !input debounce_delay
+    id: midea_state
+
+  - trigger: state
+    entity_id: !input midea_ac
+    attribute: temperature
+    for:
+      seconds: !input debounce_delay
+    id: midea_state
+
+  - trigger: state
+    entity_id: !input midea_ac
+    attribute: fan_mode
     for:
       seconds: !input debounce_delay
     id: midea_state
@@ -172,14 +202,23 @@ actions:
           - condition: trigger
             id: w100_state
         sequence:
-          # Reset preset — active presets silently override all other commands
-          - action: climate.set_preset_mode
-            target:
-              entity_id: !input midea_ac
-            data:
-              preset_mode: none
-          - delay:
-              seconds: "{{ sync_delay }}"
+          # Skip if no-attribute trigger fired but hvac_mode didn't actually change
+          - if:
+              - "{{ trigger.attribute is none and trigger.from_state.state == trigger.to_state.state }}"
+            then:
+              - stop: "Only sensor readings changed"
+
+          # Reset preset only when needed — unconditional resets cause unnecessary beeps
+          - if:
+              - "{{ state_attr(midea_ac, 'preset_mode') != 'none' }}"
+            then:
+              - action: climate.set_preset_mode
+                target:
+                  entity_id: !input midea_ac
+                data:
+                  preset_mode: none
+              - delay:
+                  seconds: "{{ sync_delay }}"
 
           # Sync HVAC mode — W100 heat maps to user-configured Midea target
           - variables:
@@ -259,6 +298,12 @@ actions:
           - condition: trigger
             id: midea_state
         sequence:
+          # Skip if no-attribute trigger fired but hvac_mode didn't actually change
+          - if:
+              - "{{ trigger.attribute is none and trigger.from_state.state == trigger.to_state.state }}"
+            then:
+              - stop: "Only sensor readings changed"
+
           # Sync HVAC mode — fan_only/dry map to off unless they match the heat target
           - variables:
               _midea_mode: "{{ states(midea_ac) }}"
