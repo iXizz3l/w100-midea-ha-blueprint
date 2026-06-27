@@ -211,14 +211,24 @@ actions:
               - delay:
                   seconds: "{{ sync_delay }}"
 
-          # Sync fan — auto passes through as named mode; low/medium/high set a %
+          # Sync fan — guard against feedback loop: skip if W100 mode matches what
+          # the current Midea % already maps to (means W100 was set by our own sync)
           - variables:
               _w100_fan: "{{ state_attr(aqara_w100, 'fan_mode') }}"
+              _midea_fan: "{{ state_attr(midea_ac, 'fan_mode') }}"
+              _midea_pct: "{{ states(midea_fan_entity) | float(0) }}"
+              _low_d: "{{ (_midea_pct - fan_low_pct) | abs }}"
+              _med_d: "{{ (_midea_pct - fan_medium_pct) | abs }}"
+              _high_d: "{{ (_midea_pct - fan_high_pct) | abs }}"
+              _midea_maps_to: >-
+                {{ 'auto' if _midea_fan == 'auto'
+                   else ('high' if _high_d <= _low_d and _high_d <= _med_d
+                         else ('medium' if _med_d <= _low_d else 'low')) }}
           - if:
               - "{{ _w100_fan == 'auto' }}"
             then:
               - if:
-                  - "{{ state_attr(midea_ac, 'fan_mode') != 'auto' }}"
+                  - "{{ _midea_fan != 'auto' }}"
                 then:
                   - action: climate.set_fan_mode
                     target:
@@ -228,14 +238,14 @@ actions:
                   - delay:
                       seconds: "{{ sync_delay }}"
             else:
-              - variables:
-                  _target_pct: >-
-                    {{ fan_low_pct if _w100_fan == 'low'
-                       else (fan_medium_pct if _w100_fan == 'medium'
-                             else fan_high_pct) }}
               - if:
-                  - "{{ states(midea_fan_entity) | int != _target_pct | int }}"
+                  - "{{ _w100_fan != _midea_maps_to }}"
                 then:
+                  - variables:
+                      _target_pct: >-
+                        {{ fan_low_pct if _w100_fan == 'low'
+                           else (fan_medium_pct if _w100_fan == 'medium'
+                                 else fan_high_pct) }}
                   - action: number.set_value
                     target:
                       entity_id: "{{ midea_fan_entity }}"
