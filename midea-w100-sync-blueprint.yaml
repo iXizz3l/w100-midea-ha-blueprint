@@ -124,6 +124,20 @@ blueprint:
           domain: sensor
           device_class: humidity
 
+    external_sensor_debounce:
+      name: External Sensor Debounce
+      description: >-
+        Seconds an external sensor value must remain stable before pushing to
+        the W100 display. Prevents flooding the display with every minor
+        sensor fluctuation.
+      default: 30
+      selector:
+        number:
+          min: 10
+          max: 300
+          step: 10
+          unit_of_measurement: seconds
+
 variables:
   midea_ac: !input midea_ac
   aqara_w100: !input aqara_w100
@@ -184,11 +198,15 @@ triggers:
 
   - trigger: state
     entity_id: !input external_temperature_sensor
+    for:
+      seconds: !input external_sensor_debounce
     id: ext_temp
     enabled: !input enable_external_data
 
   - trigger: state
     entity_id: !input external_humidity_sensor
+    for:
+      seconds: !input external_sensor_debounce
     id: ext_hum
     enabled: !input enable_external_data
 
