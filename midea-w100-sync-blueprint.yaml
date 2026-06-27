@@ -124,9 +124,6 @@ blueprint:
           domain: sensor
           device_class: humidity
 
-trigger_variables:
-  _midea_ac: !input midea_ac
-
 variables:
   midea_ac: !input midea_ac
   aqara_w100: !input aqara_w100
@@ -154,12 +151,6 @@ triggers:
     for:
       seconds: !input debounce_delay
     id: midea_state
-
-  - trigger: state
-    entity_id: "{{ 'number.' ~ _midea_ac.split('.')[1] ~ '_fan_speed' }}"
-    for:
-      seconds: !input debounce_delay
-    id: midea_fan_speed
 
   - trigger: state
     entity_id: !input external_temperature_sensor
@@ -308,31 +299,6 @@ actions:
                   fan_mode: "{{ _target_w100_fan }}"
               - delay:
                   seconds: "{{ sync_delay }}"
-
-      # ── Midea → W100 (fan speed % change) ────────────────────────────────────
-      - conditions:
-          - condition: trigger
-            id: midea_fan_speed
-          - "{{ state_attr(midea_ac, 'fan_mode') != 'auto' }}"
-        sequence:
-          - variables:
-              _midea_fan: "{{ state_attr(midea_ac, 'fan_mode') }}"
-              _midea_pct: "{{ states(midea_fan_entity) | float(0) }}"
-              _low_d: "{{ (_midea_pct - fan_low_pct) | abs }}"
-              _med_d: "{{ (_midea_pct - fan_medium_pct) | abs }}"
-              _high_d: "{{ (_midea_pct - fan_high_pct) | abs }}"
-              _target_w100_fan: >-
-                {{ 'auto' if _midea_fan == 'auto'
-                   else ('high' if _high_d <= _low_d and _high_d <= _med_d
-                         else ('medium' if _med_d <= _low_d else 'low')) }}
-          - if:
-              - "{{ state_attr(aqara_w100, 'fan_mode') != _target_w100_fan }}"
-            then:
-              - action: climate.set_fan_mode
-                target:
-                  entity_id: !input aqara_w100
-                data:
-                  fan_mode: "{{ _target_w100_fan }}"
 
       # ── External temperature → W100 ───────────────────────────────────────────
       - conditions:
