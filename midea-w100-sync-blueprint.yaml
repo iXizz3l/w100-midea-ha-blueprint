@@ -1,0 +1,378 @@
+blueprint:
+  name: Midea PortaSplit ↔ Aqara W100 Sync
+  description: >
+    Bidirectional sync between a Midea PortaSplit AC and an Aqara W100 thermostat
+    controller. Syncs HVAC mode, temperature setpoint, and fan speed in both
+    directions.
+
+    Prerequisites — The W100 thermostat mode switch must be ON before using this
+    blueprint. Enable it manually once in HA
+    (switch.<w100_entity_id_suffix>_thermostat_mode). The blueprint does not
+    manage this switch.
+  domain: automation
+
+  input:
+    midea_ac:
+      name: Midea AC
+      description: The Midea PortaSplit climate entity
+      selector:
+        entity:
+          domain: climate
+
+    aqara_w100:
+      name: Aqara W100
+      description: The Aqara W100 climate entity
+      selector:
+        entity:
+          domain: climate
+
+    w100_heat_target:
+      name: W100 Heat Mode Target
+      description: >-
+        Which Midea mode to activate when the W100 is set to heat. When Midea
+        is in this mode the W100 will show heat instead of off.
+      default: heat
+      selector:
+        select:
+          options:
+            - label: Heat
+              value: heat
+            - label: Dry
+              value: dry
+            - label: Fan Only
+              value: fan_only
+
+    fan_low_pct:
+      name: Fan Speed — Low
+      description: Midea fan speed % when W100 is set to Low
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+
+    fan_medium_pct:
+      name: Fan Speed — Medium
+      description: Midea fan speed % when W100 is set to Medium
+      default: 50
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+
+    fan_high_pct:
+      name: Fan Speed — High
+      description: Midea fan speed % when W100 is set to High
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+
+    debounce_delay:
+      name: Debounce Delay
+      description: >-
+        Seconds a device state must remain stable before syncing. Prevents
+        feedback loops between the two devices.
+      default: 3
+      selector:
+        number:
+          min: 3
+          max: 15
+          step: 1
+          unit_of_measurement: seconds
+
+    sync_delay:
+      name: Sync Delay
+      description: Pause in seconds between sequential commands within one sync run
+      default: 2
+      selector:
+        number:
+          min: 1
+          max: 5
+          step: 1
+          unit_of_measurement: seconds
+
+    enable_external_data:
+      name: Enable External Sensor Data
+      description: Push external temperature and/or humidity readings to the W100 display
+      default: false
+      selector:
+        boolean:
+
+    external_temperature_sensor:
+      name: External Temperature Sensor
+      description: Temperature sensor to display on the W100 (optional)
+      default: []
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+
+    external_humidity_sensor:
+      name: External Humidity Sensor
+      description: Humidity sensor to display on the W100 (optional)
+      default: []
+      selector:
+        entity:
+          domain: sensor
+          device_class: humidity
+
+trigger_variables:
+  _midea_ac: !input midea_ac
+
+variables:
+  midea_ac: !input midea_ac
+  aqara_w100: !input aqara_w100
+  w100_heat_target: !input w100_heat_target
+  fan_low_pct: !input fan_low_pct
+  fan_medium_pct: !input fan_medium_pct
+  fan_high_pct: !input fan_high_pct
+  sync_delay: !input sync_delay
+  enable_external_data: !input enable_external_data
+  external_temperature_sensor: !input external_temperature_sensor
+  external_humidity_sensor: !input external_humidity_sensor
+  midea_fan_entity: "{{ 'number.' ~ midea_ac.split('.')[1] ~ '_fan_speed' }}"
+  w100_ext_temp_entity: "{{ 'number.' ~ aqara_w100.split('.')[1] ~ '_external_temperature' }}"
+  w100_ext_hum_entity: "{{ 'number.' ~ aqara_w100.split('.')[1] ~ '_external_humidity' }}"
+
+triggers:
+  - trigger: state
+    entity_id: !input aqara_w100
+    for:
+      seconds: !input debounce_delay
+    id: w100_state
+
+  - trigger: state
+    entity_id: !input midea_ac
+    for:
+      seconds: !input debounce_delay
+    id: midea_state
+
+  - trigger: state
+    entity_id: "{{ 'number.' ~ _midea_ac.split('.')[1] ~ '_fan_speed' }}"
+    for:
+      seconds: !input debounce_delay
+    id: midea_fan_speed
+
+  - trigger: state
+    entity_id: !input external_temperature_sensor
+    id: ext_temp
+    enabled: !input enable_external_data
+
+  - trigger: state
+    entity_id: !input external_humidity_sensor
+    id: ext_hum
+    enabled: !input enable_external_data
+
+conditions: []
+
+actions:
+  - choose:
+
+      # ── W100 → Midea ─────────────────────────────────────────────────────────
+      - conditions:
+          - condition: trigger
+            id: w100_state
+        sequence:
+          # Reset preset — active presets silently override all other commands
+          - action: climate.set_preset_mode
+            target:
+              entity_id: !input midea_ac
+            data:
+              preset_mode: none
+          - delay:
+              seconds: "{{ sync_delay }}"
+
+          # Sync HVAC mode — W100 heat maps to user-configured Midea target
+          - variables:
+              _w100_mode: "{{ states(aqara_w100) }}"
+              _target_mode: "{{ w100_heat_target if _w100_mode == 'heat' else _w100_mode }}"
+          - if:
+              - "{{ states(midea_ac) != _target_mode }}"
+            then:
+              - action: climate.set_hvac_mode
+                target:
+                  entity_id: !input midea_ac
+                data:
+                  hvac_mode: "{{ _target_mode }}"
+              - delay:
+                  seconds: "{{ sync_delay }}"
+
+          # Sync temperature — round W100 setpoint up to nearest 1°C, clamp to Midea min
+          - variables:
+              _target_temp: >-
+                {{ [state_attr(aqara_w100, 'temperature') | float | round(0, 'ceil') | int, 16] | max }}
+          - if:
+              - "{{ state_attr(midea_ac, 'temperature') | int != _target_temp }}"
+            then:
+              - action: climate.set_temperature
+                target:
+                  entity_id: !input midea_ac
+                data:
+                  temperature: "{{ _target_temp }}"
+              - delay:
+                  seconds: "{{ sync_delay }}"
+
+          # Sync fan — auto passes through as named mode; low/medium/high set a %
+          - variables:
+              _w100_fan: "{{ state_attr(aqara_w100, 'fan_mode') }}"
+          - if:
+              - "{{ _w100_fan == 'auto' }}"
+            then:
+              - if:
+                  - "{{ state_attr(midea_ac, 'fan_mode') != 'auto' }}"
+                then:
+                  - action: climate.set_fan_mode
+                    target:
+                      entity_id: !input midea_ac
+                    data:
+                      fan_mode: auto
+                  - delay:
+                      seconds: "{{ sync_delay }}"
+            else:
+              - variables:
+                  _target_pct: >-
+                    {{ fan_low_pct if _w100_fan == 'low'
+                       else (fan_medium_pct if _w100_fan == 'medium'
+                             else fan_high_pct) }}
+              - if:
+                  - "{{ states(midea_fan_entity) | int != _target_pct | int }}"
+                then:
+                  - action: number.set_value
+                    target:
+                      entity_id: "{{ midea_fan_entity }}"
+                    data:
+                      value: "{{ _target_pct | int }}"
+                  - delay:
+                      seconds: "{{ sync_delay }}"
+
+      # ── Midea → W100 (climate state change) ──────────────────────────────────
+      - conditions:
+          - condition: trigger
+            id: midea_state
+        sequence:
+          # Sync HVAC mode — fan_only/dry map to off unless they match the heat target
+          - variables:
+              _midea_mode: "{{ states(midea_ac) }}"
+              _target_w100_mode: >-
+                {{ _midea_mode if _midea_mode in ['off', 'cool', 'auto', 'heat']
+                   else ('heat' if _midea_mode == w100_heat_target else 'off') }}
+          - if:
+              - "{{ states(aqara_w100) != _target_w100_mode }}"
+            then:
+              - action: climate.set_hvac_mode
+                target:
+                  entity_id: !input aqara_w100
+                data:
+                  hvac_mode: "{{ _target_w100_mode }}"
+              - delay:
+                  seconds: "{{ sync_delay }}"
+
+          # Sync temperature — Midea 1°C steps are always valid on W100's 0.5°C grid
+          - if:
+              - "{{ state_attr(midea_ac, 'temperature') != state_attr(aqara_w100, 'temperature') }}"
+            then:
+              - action: climate.set_temperature
+                target:
+                  entity_id: !input aqara_w100
+                data:
+                  temperature: "{{ state_attr(midea_ac, 'temperature') }}"
+              - delay:
+                  seconds: "{{ sync_delay }}"
+
+          # Sync fan — auto passes through; others matched by closest configured %
+          - variables:
+              _midea_fan: "{{ state_attr(midea_ac, 'fan_mode') }}"
+              _midea_pct: "{{ states(midea_fan_entity) | float(0) }}"
+              _low_d: "{{ (_midea_pct - fan_low_pct) | abs }}"
+              _med_d: "{{ (_midea_pct - fan_medium_pct) | abs }}"
+              _high_d: "{{ (_midea_pct - fan_high_pct) | abs }}"
+              _target_w100_fan: >-
+                {{ 'auto' if _midea_fan == 'auto'
+                   else ('high' if _high_d <= _low_d and _high_d <= _med_d
+                         else ('medium' if _med_d <= _low_d else 'low')) }}
+          - if:
+              - "{{ state_attr(aqara_w100, 'fan_mode') != _target_w100_fan }}"
+            then:
+              - action: climate.set_fan_mode
+                target:
+                  entity_id: !input aqara_w100
+                data:
+                  fan_mode: "{{ _target_w100_fan }}"
+              - delay:
+                  seconds: "{{ sync_delay }}"
+
+      # ── Midea → W100 (fan speed % change) ────────────────────────────────────
+      - conditions:
+          - condition: trigger
+            id: midea_fan_speed
+          - "{{ state_attr(midea_ac, 'fan_mode') != 'auto' }}"
+        sequence:
+          - variables:
+              _midea_fan: "{{ state_attr(midea_ac, 'fan_mode') }}"
+              _midea_pct: "{{ states(midea_fan_entity) | float(0) }}"
+              _low_d: "{{ (_midea_pct - fan_low_pct) | abs }}"
+              _med_d: "{{ (_midea_pct - fan_medium_pct) | abs }}"
+              _high_d: "{{ (_midea_pct - fan_high_pct) | abs }}"
+              _target_w100_fan: >-
+                {{ 'auto' if _midea_fan == 'auto'
+                   else ('high' if _high_d <= _low_d and _high_d <= _med_d
+                         else ('medium' if _med_d <= _low_d else 'low')) }}
+          - if:
+              - "{{ state_attr(aqara_w100, 'fan_mode') != _target_w100_fan }}"
+            then:
+              - action: climate.set_fan_mode
+                target:
+                  entity_id: !input aqara_w100
+                data:
+                  fan_mode: "{{ _target_w100_fan }}"
+
+      # ── External temperature → W100 ───────────────────────────────────────────
+      - conditions:
+          - condition: trigger
+            id: ext_temp
+          - "{{ enable_external_data }}"
+          - "{{ has_value(external_temperature_sensor) }}"
+        sequence:
+          - if:
+              - condition: numeric_state
+                entity_id: !input external_temperature_sensor
+                above: -100
+                below: 100
+            then:
+              - action: number.set_value
+                target:
+                  entity_id: "{{ w100_ext_temp_entity }}"
+                data:
+                  value: "{{ states(external_temperature_sensor) | float }}"
+              - delay:
+                  seconds: "{{ sync_delay }}"
+
+      # ── External humidity → W100 ──────────────────────────────────────────────
+      - conditions:
+          - condition: trigger
+            id: ext_hum
+          - "{{ enable_external_data }}"
+          - "{{ has_value(external_humidity_sensor) }}"
+        sequence:
+          - if:
+              - condition: numeric_state
+                entity_id: !input external_humidity_sensor
+                above: 0
+                below: 100
+            then:
+              - action: number.set_value
+                target:
+                  entity_id: "{{ w100_ext_hum_entity }}"
+                data:
+                  value: "{{ states(external_humidity_sensor) | float }}"
+
+mode: queued
+max: 10
