@@ -102,13 +102,13 @@ blueprint:
     write_lockout_helper:
       name: Write Lockout Helper
       description: >-
-        An input_number helper used to track the last time this automation sent
-        a command. Create one in Settings → Helpers → Add Helper → Number, set
-        min=0, max=9999999999, step=1, mode=box. This blocks reverse triggers
-        for a short period after any write to prevent feedback loops.
+        A Date and/or time helper that tracks the last time this automation sent
+        a command. Create one in Settings → Helpers → Add Helper → Date and/or
+        time, enable both date and time. This blocks reverse triggers for a
+        short period after any write to prevent feedback loops.
       selector:
         entity:
-          domain: input_number
+          domain: input_datetime
 
     write_lockout_seconds:
       name: Write Lockout Duration
@@ -255,7 +255,7 @@ actions:
 
           # Skip if automation recently sent commands — prevents reverse feedback loop
           - if:
-              - "{{ (now().timestamp() - states(write_lockout_helper) | float(0)) < write_lockout_seconds }}"
+              - "{{ (now().timestamp() - state_attr(write_lockout_helper, 'timestamp') | float(0)) < write_lockout_seconds }}"
             then:
               - stop: "Write lockout active"
 
@@ -268,11 +268,11 @@ actions:
                   entity_id: !input midea_ac
                 data:
                   preset_mode: none
-              - action: input_number.set_value
+              - action: input_datetime.set_datetime
                 target:
                   entity_id: !input write_lockout_helper
                 data:
-                  value: "{{ now().timestamp() | int }}"
+                  datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
               - delay:
                   seconds: "{{ sync_delay }}"
 
@@ -288,11 +288,11 @@ actions:
                   entity_id: !input midea_ac
                 data:
                   hvac_mode: "{{ _target_mode }}"
-              - action: input_number.set_value
+              - action: input_datetime.set_datetime
                 target:
                   entity_id: !input write_lockout_helper
                 data:
-                  value: "{{ now().timestamp() | int }}"
+                  datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
               - delay:
                   seconds: "{{ sync_delay }}"
 
@@ -308,11 +308,11 @@ actions:
                   entity_id: !input midea_ac
                 data:
                   temperature: "{{ _target_temp }}"
-              - action: input_number.set_value
+              - action: input_datetime.set_datetime
                 target:
                   entity_id: !input write_lockout_helper
                 data:
-                  value: "{{ now().timestamp() | int }}"
+                  datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
               - delay:
                   seconds: "{{ sync_delay }}"
 
@@ -382,7 +382,7 @@ actions:
 
           # Skip if automation recently sent commands — prevents reverse feedback loop
           - if:
-              - "{{ (now().timestamp() - states(write_lockout_helper) | float(0)) < write_lockout_seconds }}"
+              - "{{ (now().timestamp() - state_attr(write_lockout_helper, 'timestamp') | float(0)) < write_lockout_seconds }}"
             then:
               - stop: "Write lockout active"
 
@@ -400,11 +400,11 @@ actions:
                   entity_id: !input aqara_w100
                 data:
                   hvac_mode: "{{ _target_w100_mode }}"
-              - action: input_number.set_value
+              - action: input_datetime.set_datetime
                 target:
                   entity_id: !input write_lockout_helper
                 data:
-                  value: "{{ now().timestamp() | int }}"
+                  datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
               - delay:
                   seconds: "{{ sync_delay }}"
 
@@ -417,11 +417,11 @@ actions:
                   entity_id: !input aqara_w100
                 data:
                   temperature: "{{ state_attr(midea_ac, 'temperature') }}"
-              - action: input_number.set_value
+              - action: input_datetime.set_datetime
                 target:
                   entity_id: !input write_lockout_helper
                 data:
-                  value: "{{ now().timestamp() | int }}"
+                  datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
               - delay:
                   seconds: "{{ sync_delay }}"
 
@@ -444,11 +444,11 @@ actions:
                   entity_id: !input aqara_w100
                 data:
                   fan_mode: "{{ _target_w100_fan }}"
-              - action: input_number.set_value
+              - action: input_datetime.set_datetime
                 target:
                   entity_id: !input write_lockout_helper
                 data:
-                  value: "{{ now().timestamp() | int }}"
+                  datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
               - delay:
                   seconds: "{{ sync_delay }}"
 
