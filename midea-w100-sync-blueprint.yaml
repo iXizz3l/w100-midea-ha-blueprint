@@ -340,11 +340,11 @@ actions:
                       entity_id: !input midea_ac
                     data:
                       fan_mode: auto
-                  - action: input_number.set_value
+                  - action: input_datetime.set_datetime
                     target:
                       entity_id: !input write_lockout_helper
                     data:
-                      value: "{{ now().timestamp() | int }}"
+                      datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
                   - delay:
                       seconds: "{{ sync_delay }}"
             else:
@@ -361,11 +361,11 @@ actions:
                       entity_id: "{{ midea_fan_entity }}"
                     data:
                       value: "{{ _target_pct | int }}"
-                  - action: input_number.set_value
+                  - action: input_datetime.set_datetime
                     target:
                       entity_id: !input write_lockout_helper
                     data:
-                      value: "{{ now().timestamp() | int }}"
+                      datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
                   - delay:
                       seconds: "{{ sync_delay }}"
 
