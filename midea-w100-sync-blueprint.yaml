@@ -99,6 +99,31 @@ blueprint:
           step: 1
           unit_of_measurement: seconds
 
+    write_lockout_helper:
+      name: Write Lockout Helper
+      description: >-
+        An input_number helper used to track the last time this automation sent
+        a command. Create one in Settings → Helpers → Add Helper → Number, set
+        min=0, max=9999999999, step=1, mode=box. This blocks reverse triggers
+        for a short period after any write to prevent feedback loops.
+      selector:
+        entity:
+          domain: input_number
+
+    write_lockout_seconds:
+      name: Write Lockout Duration
+      description: >-
+        Seconds to skip incoming triggers after the automation last sent a
+        command to a device. Prevents the reverse sync from firing due to our
+        own commands.
+      default: 10
+      selector:
+        number:
+          min: 5
+          max: 60
+          step: 1
+          unit_of_measurement: seconds
+
     enable_external_data:
       name: Enable External Sensor Data
       description: Push external temperature and/or humidity readings to the W100 display
@@ -146,6 +171,8 @@ variables:
   fan_medium_pct: !input fan_medium_pct
   fan_high_pct: !input fan_high_pct
   sync_delay: !input sync_delay
+  write_lockout_helper: !input write_lockout_helper
+  write_lockout_seconds: !input write_lockout_seconds
   enable_external_data: !input enable_external_data
   external_temperature_sensor: !input external_temperature_sensor
   external_humidity_sensor: !input external_humidity_sensor
@@ -226,6 +253,12 @@ actions:
             then:
               - stop: "Only sensor readings changed"
 
+          # Skip if automation recently sent commands — prevents reverse feedback loop
+          - if:
+              - "{{ (now().timestamp() - states(write_lockout_helper) | float(0)) < write_lockout_seconds }}"
+            then:
+              - stop: "Write lockout active"
+
           # Reset preset only when needed — unconditional resets cause unnecessary beeps
           - if:
               - "{{ state_attr(midea_ac, 'preset_mode') != 'none' }}"
@@ -235,6 +268,11 @@ actions:
                   entity_id: !input midea_ac
                 data:
                   preset_mode: none
+              - action: input_number.set_value
+                target:
+                  entity_id: !input write_lockout_helper
+                data:
+                  value: "{{ now().timestamp() | int }}"
               - delay:
                   seconds: "{{ sync_delay }}"
 
@@ -250,6 +288,11 @@ actions:
                   entity_id: !input midea_ac
                 data:
                   hvac_mode: "{{ _target_mode }}"
+              - action: input_number.set_value
+                target:
+                  entity_id: !input write_lockout_helper
+                data:
+                  value: "{{ now().timestamp() | int }}"
               - delay:
                   seconds: "{{ sync_delay }}"
 
@@ -265,6 +308,11 @@ actions:
                   entity_id: !input midea_ac
                 data:
                   temperature: "{{ _target_temp }}"
+              - action: input_number.set_value
+                target:
+                  entity_id: !input write_lockout_helper
+                data:
+                  value: "{{ now().timestamp() | int }}"
               - delay:
                   seconds: "{{ sync_delay }}"
 
@@ -292,6 +340,11 @@ actions:
                       entity_id: !input midea_ac
                     data:
                       fan_mode: auto
+                  - action: input_number.set_value
+                    target:
+                      entity_id: !input write_lockout_helper
+                    data:
+                      value: "{{ now().timestamp() | int }}"
                   - delay:
                       seconds: "{{ sync_delay }}"
             else:
@@ -308,6 +361,11 @@ actions:
                       entity_id: "{{ midea_fan_entity }}"
                     data:
                       value: "{{ _target_pct | int }}"
+                  - action: input_number.set_value
+                    target:
+                      entity_id: !input write_lockout_helper
+                    data:
+                      value: "{{ now().timestamp() | int }}"
                   - delay:
                       seconds: "{{ sync_delay }}"
 
@@ -321,6 +379,12 @@ actions:
               - "{{ trigger.attribute is none and trigger.from_state.state == trigger.to_state.state }}"
             then:
               - stop: "Only sensor readings changed"
+
+          # Skip if automation recently sent commands — prevents reverse feedback loop
+          - if:
+              - "{{ (now().timestamp() - states(write_lockout_helper) | float(0)) < write_lockout_seconds }}"
+            then:
+              - stop: "Write lockout active"
 
           # Sync HVAC mode — fan_only/dry map to off unless they match the heat target
           - variables:
@@ -336,6 +400,11 @@ actions:
                   entity_id: !input aqara_w100
                 data:
                   hvac_mode: "{{ _target_w100_mode }}"
+              - action: input_number.set_value
+                target:
+                  entity_id: !input write_lockout_helper
+                data:
+                  value: "{{ now().timestamp() | int }}"
               - delay:
                   seconds: "{{ sync_delay }}"
 
@@ -348,6 +417,11 @@ actions:
                   entity_id: !input aqara_w100
                 data:
                   temperature: "{{ state_attr(midea_ac, 'temperature') }}"
+              - action: input_number.set_value
+                target:
+                  entity_id: !input write_lockout_helper
+                data:
+                  value: "{{ now().timestamp() | int }}"
               - delay:
                   seconds: "{{ sync_delay }}"
 
@@ -370,6 +444,11 @@ actions:
                   entity_id: !input aqara_w100
                 data:
                   fan_mode: "{{ _target_w100_fan }}"
+              - action: input_number.set_value
+                target:
+                  entity_id: !input write_lockout_helper
+                data:
+                  value: "{{ now().timestamp() | int }}"
               - delay:
                   seconds: "{{ sync_delay }}"
 
